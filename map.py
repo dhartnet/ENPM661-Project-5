@@ -1,8 +1,6 @@
 import numpy as np
-from sympy import *
-from sympy.printing import pprint
 
-map = np.zeros((200, 600))
+map = np.zeros((600, 200))
 
 i = 0
 j = 0
@@ -32,15 +30,15 @@ while case == False:
 
   # obs 1
   if i >= x11 and i <= x12 and j >= y11 and j <= y12:
-    map[j,i] = 1
-  
+    map[i,j] = 1
+
   # obs 2
   elif i >= x21 and i <= x22 and j >= y21 and j <= y22:
-    map[j,i] = 1
+    map[i,j] = 1
 
   # obs 3
   elif i >= x31 and i <= x32 and j >= y31 and j <= y32:
-    map[j,i] = 1
+    map[i,j] = 1
 
   i = i + 1
 
@@ -52,4 +50,4 @@ while case == False:
     i = 0
     j = j + 1
 
-pprint(map[75,420])
+print(map[420,75])
