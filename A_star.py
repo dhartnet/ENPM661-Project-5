@@ -50,34 +50,30 @@ class UpdateableQueue:
         return self.queue.empty()
 
     def __contains__(self, key):
-        return key in self.entry_finder
-    
-    def clear(self):
-        self.queue = PriorityQueue()
-        self.entry_finder = {}    
+        return key in self.entry_finder   
 
 def create_map():
     i = 0
     j = 0
 
     # obs 1
-    x11 = 150 - clearance - radius
-    x12 = 175 + clearance + radius
-    y11 = 0 - clearance - radius
-    y12 = 100 + clearance + radius
+    x11 = 150 // res - clearance - radius
+    x12 = 175 // res + clearance + radius
+    y11 = 0 // res - clearance - radius
+    y12 = 100 // res + clearance + radius
 
     # obs 2
-    x21 = 250 - clearance - radius
-    x22 = 275 + clearance + radius
-    y21 = 100 - clearance - radius
-    y22 = 200 + clearance + radius
+    x21 = 250 // res - clearance - radius
+    x22 = 275 // res + clearance + radius
+    y21 = 100 // res - clearance - radius
+    y22 = 200 // res + clearance + radius
 
     # obs 3
 
-    x31 = 382 - clearance - radius
-    x32 = 458 + clearance + radius
-    y31 = 55 - clearance - radius
-    y32 = 105 + clearance + radius
+    x31 = 382 // res - clearance - radius
+    x32 = 458 // res + clearance + radius
+    y31 = 55 // res - clearance - radius
+    y32 = 105 // res + clearance + radius
 
     case = False
 
@@ -97,11 +93,11 @@ def create_map():
 
         i = i + 1
 
-        if i == 600 and j == 199:
+        if i == 600 // res and j == 199 // res:
 
             case = True
 
-        if i == 600:
+        if i == 600 // res:
             i = 0
             j = j + 1
 
@@ -141,23 +137,23 @@ def obstacle_space():
     obstacle_list = []
 
     # obs 1
-    x11 = 150 * conversion
-    x12 = 175 * conversion
-    y11 = 0 * conversion
-    y12 = 100 * conversion
+    x11 = 150 // res* conversion
+    x12 = 175 // res* conversion
+    y11 = 0 // res* conversion
+    y12 = 100 // res* conversion
 
     # obs 2
-    x21 = 250 * conversion
-    x22 = 275  * conversion
-    y21 = 100 * conversion
-    y22 = 200 * conversion
+    x21 = 250 // res* conversion
+    x22 = 275  // res* conversion
+    y21 = 100 // res* conversion
+    y22 = 200 // res* conversion
 
     # obs 3
 
-    x31 = 382 * conversion
-    x32 = 458 * conversion
-    y31 = 55 * conversion
-    y32 = 105 * conversion
+    x31 = 382 // res* conversion
+    x32 = 458 // res* conversion
+    y31 = 55 // res* conversion
+    y32 = 105 // res* conversion
 
     obstacle_list.append(((0,0),(visX,visY)))
     obstacle_list.append(((x11,y11),(x12,y12)))
@@ -372,9 +368,10 @@ def heuristic(node, goal_node, weight):
   return weight * np.sqrt(np.square(goal_node[0] - node[0]) + np.square(goal_node[1] - node[1]))
 
 # Runs A* from start node to goal node and returns visited list and parent information
-def a_star_algorithm(cost_grid, start_node, goal_node):
-    start_node = (int(start_node[0]), int(start_node[1]), start_node[2])
-    goal_node = (int(goal_node[0]), int(goal_node[1]), goal_node[2])
+def a_star_algorithm(blocked_grid, start_node, goal_node):
+    # Create cost_grid and initialize cost to come for start_node
+    cost_grid = [[[float('inf')] * 12 for _ in range(spaceY)] for _ in range(spaceX)]
+    cost_grid[start_node[0]][start_node[1]][start_node[2]] = 0
 
     # Create grid to store parents
     parent_grid = [[[None] * 12 for _ in range(spaceY)] for _ in range(spaceX)]
@@ -387,7 +384,6 @@ def a_star_algorithm(cost_grid, start_node, goal_node):
     # Priority queue to store open nodes
     # Cost to come, coordinate values (x,y), parent
     open_queue = UpdateableQueue()
-    open_queue.clear()
     open_queue.put(0, (start_node,(0),(0,0), (start_node[0],start_node[1],int(30*start_node[2]))))  # (priority, node)
 
     while not open_queue.empty():
@@ -406,11 +402,10 @@ def a_star_algorithm(cost_grid, start_node, goal_node):
         node_cost = cost_grid[node[0]][node[1]][node[2]]
 
         for action in actions:
-            #print(action)
             action_cost = action[1]
             move = action[0]
             raw_move = action[3]
-            if not visited_grid[move[0]][move[1]][move[2]]:
+            if not visited_grid[move[0]][move[1]][move[2]] and not blocked_grid[move[0]][move[1]]:
                 new_cost = node_cost + action_cost
                 if  new_cost < cost_grid[move[0]][move[1]][move[2]]:
                     cost_grid[move[0]][move[1]][move[2]] = new_cost
@@ -418,7 +413,7 @@ def a_star_algorithm(cost_grid, start_node, goal_node):
                     open_queue.put(priority, action)                    
                     parent_grid[move[0]][move[1]][move[2]] = node_tuple
 
-    return parent_grid, visited_list, print("Failed to find goal")
+    return parent_grid, visited_list, print(actions), print("Failed to find goal")
 
 # Backtracking using path list created from visited/path dictionary
 def find_path(parent_grid, visited_list, start):
@@ -433,15 +428,15 @@ def find_path(parent_grid, visited_list, start):
         current_node = current_node[0]
     return path
 
-def lazy_PRM():
-    # Create cost_grid and initialize cost to come for start_node
-    cost_grid = [[[float('inf')] * 12 for _ in range(spaceY)] for _ in range(spaceX)]
-    cost_grid[start_node[0]][start_node[1]][start_node[2]] = 0
-      
+def lazy_PRM(start_node, goal_node):
+    blocked_grid = [[False for _ in range(spaceY)] for _ in range(spaceX)]
+    blocked_grid[start_node[0]][start_node[1]] = False
+    
     path = ()  
     in_obstacle = True
-    while in_obstacle:      
-        explored = a_star_algorithm(cost_grid, start_node, goal_node)
+    while in_obstacle:  
+        #print("Running A*", '\n')    
+        explored = a_star_algorithm(blocked_grid, start_node, goal_node)
         parents = explored[0]
         visited = explored[1]
 
@@ -456,11 +451,7 @@ def lazy_PRM():
             node = node_info[0]
             if inObstacle(node):
                 in_obstacle = True
-                for i in range(11):
-                    print('updating cost')
-                    #cost_grid[node[0]][node[1]][i] = 10000
-            if in_obstacle:
-                break   
+                blocked_grid[node[0]][node[1]] = True 
 
     # ## Initialize Canvas to visualization size
     canvas = np.ones((visY, visX, 3), dtype=np.uint8) * 255  # White canvas
@@ -496,17 +487,20 @@ def lazy_PRM():
 
 
 #### Main ###
+res = 1
+
 weight = 1.4 # option for weighted A*
 
 # Robot Radius
-radius = 22 # cm
+radius = 22 // res # cm
 
 # Additional clearance to be added to the radius
-clearance = 2 # cm
+clearance = 2 // res # cm
 
 # Grid Size Variables - Used as indexes for storing node information
-spaceX = 600 # cm
-spaceY = 200 # cm
+
+spaceX = 600 // res # cm
+spaceY = 200 // res # cm
 map = np.zeros((spaceX, spaceY))
 create_map()
 
@@ -525,38 +519,20 @@ resizeY = 400 # pixels
 thickness = conversion
 
 # Pre-defined start node in Gazebo project
-start_node = tuple((100, 100, 0))
+start_node = tuple((50// res , 100// res , 0))
 
 #Node used for testing
-goal_node = tuple((575, 100, 0))
+goal_node = tuple((300// res , 150// res , 0))
 
 # Wheel speeds in RPM 
 rpm1 = (int(40))
 rpm2 = (int(80))
 
-#print('Start Node is (100, 100, 0) (centimeters)', '\n')
-#print('Wheel speeds are 40 and 80 RPM', '\n')
-
-# # Get and verify input goal coordinate
-# xg = int(input('Enter x coordinate value for goal coordinate in centimeters: '))
-# yg = int(input('Enter y coordinate value for goal coordinate in centimeters: '))
-# thetag = int(0)//30
-# goal_node = tuple((xg, yg, thetag)) # cm
-# while inObstacle(goal_node, clearance, radius):
-#     print('Node outside workspace or in obstacle. Choose new goal location')
-#     xg = int(input('Enter x coordinate value for goal location in centimeters: '))
-#     yg = int(input('Enter y coordinate value for goal location in centimeters: '))
-#     thetag = int(0)//30
-#     goal_node = tuple((xg, yg, thetag)) # cm
-# goal_node = tuple((xg, yg, thetag)) # cm
-
-#print('Goal Node is ', goal_node, ' in centimeters', '\n')
-
 # Start timer
 ti = time.time()
 
 # Run A* Algorithm
-lazy_PRM()
+lazy_PRM(start_node, goal_node)
 
 # Get time taken to find path
 tf = time.time()
