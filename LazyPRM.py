@@ -7,7 +7,7 @@ import cv2
 import time
 import random
 import numpy as np
-import networkx as nx
+import heapq
 from scipy.spatial import cKDTree
 
 # Create the obstacle map
@@ -148,7 +148,7 @@ def sample_points_uniform(num_samples, space_limits, start_node, end_node):
 
     min_x, max_x, min_y, max_y = space_limits
 
-    sampled_points = [start_node, end_node]
+    sampled_points = [(start_node,0,(0,0)), (end_node,0,(0,0))]
     
     # Calculate the aspect ratio of the space
     aspect_ratio = (max_x - min_x) / (max_y - min_y)
@@ -169,7 +169,7 @@ def sample_points_uniform(num_samples, space_limits, start_node, end_node):
             x = min_x + i * step_x
             y = min_y + j * step_y
             for theta_index in range(12):  # Iterate over 12 theta values
-                sampled_points.append((round(x, 0), round(y, 0), theta_index))
+                sampled_points.append(((round(x, 0), round(y, 0), theta_index),0,(0,0)))
     
     # Return the sampled points
     return sampled_points
@@ -179,19 +179,22 @@ def calculate_distance(point1, point2):
     return np.linalg.norm(np.array(point1) - np.array(point2))
 
 # Takes the sampled nodes list and generates a connected graph
-def generate_adjacency_list(points, max_neighbors=4, max_distance=30, threshold=4):
+def generate_adjacency_list(sampled_points, max_neighbors=4, max_distance=30, threshold=4):
     adjacency_list = {}
-    point_array = np.array(points)
+    # Extracting only the relevant tuple elements from sampled_points
+    only_points = [point[0] for point in sampled_points]
+    point_array = np.array(only_points)  # Convert to NumPy array
+    
     tree = cKDTree(point_array)
     
-    for point in points:
-        indices = tree.query_ball_point(point, max_distance)
-        possible_neighbors = [tuple(neighbor) for neighbor in point_array[indices] if not np.array_equal(neighbor, point)]
+    for point in sampled_points:
+        indices = tree.query_ball_point(point[0], max_distance)
+        possible_neighbors = [tuple(neighbor) for neighbor in point_array[indices] if not np.array_equal(neighbor, point[0])]
         random.shuffle(possible_neighbors)  # Shuffle the list of neighbors before rounding
-        valid_neighbors = connect_neighbors(point, possible_neighbors, threshold, max_neighbors)
+        valid_neighbors = connect_neighbors(point[0], possible_neighbors, threshold, max_neighbors)
         if len(valid_neighbors) > max_neighbors:
             valid_neighbors = random.sample(valid_neighbors, max_neighbors)  # Randomly select max_neighbors from valid_neighbors
-        adjacency_list[point] = valid_neighbors
+        adjacency_list[point[0]] = valid_neighbors
     
     return adjacency_list
 
@@ -199,16 +202,15 @@ def generate_adjacency_list(points, max_neighbors=4, max_distance=30, threshold=
 def connect_neighbors(point, possible_neighbors, threshold, max_neighbors):
     neighbors = []
     moves = newNodes(point, clearance, radius, rpm1, rpm2)
-    moves = [move[0] for move in moves]
-    
+#    moves = [move[0] for move in moves]
     count = 0  # Variable to keep track of the number of neighbors found
-    for neighbor in possible_neighbors:
+    for neighbor in possible_neighbors:    
         if count >= max_neighbors:
             break  # Exit the loop if maximum neighbors reached
         for move in moves:
-            distance = calculate_distance(neighbor, move)
+            distance = calculate_distance(neighbor, move[0])
             if distance <= threshold:
-                neighbors.append(neighbor)
+                neighbors.append((neighbor,move[1],move[2]))
                 count += 1
                 if count >= max_neighbors:
                     break  # Exit the inner loop if maximum neighbors reached
@@ -251,13 +253,12 @@ def smooth_path(path, max_distance=60, threshold=4):
     return path
 
 # Returns the path with the required move information
-def get_move_data(path, threshold=8):
+def get_move_data(path, threshold=7):
     move_path = []
     moves = []
     for i in range(len(path)-1):
         point = path[i]
-        moves.append(newNodes(point, clearance, radius, rpm1, rpm2))
-    for point in path:
+        moves = newNodes(point, clearance, radius, rpm1, rpm2)
         for move in moves:
             distance = calculate_distance(point, move[0][0])
             if distance <= threshold:           
@@ -310,7 +311,7 @@ def draw_obstacles(canvas, obstacles, video_output):
 def draw_connections(image, adjacency_list, color=(0, 255, 0), thickness=4):
     for point, neighbors in adjacency_list.items():
         for neighbor in neighbors:
-            cv2.line(image, (int(point[0]*conversion), int(point[1]*conversion)), (int(neighbor[0]*conversion), int(neighbor[1]*conversion)), color, thickness)
+            cv2.line(image, (int(point[0]*conversion), int(point[1]*conversion)), (int(neighbor[0][0]*conversion), int(neighbor[0][1]*conversion)), color, thickness)
     image1 = cv2.resize(image, (resizeX, resizeY)) 
     #cv2.imshow('A*', image1)
     video_output.write(image1)
@@ -321,7 +322,9 @@ def draw_connections(image, adjacency_list, color=(0, 255, 0), thickness=4):
 # Draws the sampled points
 def draw_points(image, points, color=(255, 0, 0), radius=20):
     for point in points:
-        cv2.circle(image, (int(point[0]*conversion), int(point[1]*conversion)), radius, color, -1)
+        x = int(point[0][0] * conversion)
+        y = int(point[0][1] * conversion)
+        cv2.circle(image, (x, y), radius, color, -1)
     image1 = cv2.resize(image, (resizeX, resizeY))
     #cv2.imshow('A*', image1)
     video_output.write(image1)
@@ -342,20 +345,65 @@ def add_blank_frames(canvas, video_output, fps, seconds):
         video_output.write(canvas1)
     return
 
+# Heuristic
+def euclidean_distance(node1, node2):
+    x1, y1, _ = node1
+    x2, y2, _ = node2
+    return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+
+# Reconstruct the path from the came_from dictionary
+def reconstruct_path(came_from, current_node):
+    total_path = [current_node]
+    while current_node in came_from:
+        current_node = came_from[current_node]
+        total_path.append(current_node)
+    return total_path[::-1]
+
 # Runs A* on the given graph. Doesn't check for collision or explore the obstacle space. 
 # Just navigates the given predefined graph. Not the focus of this project.
-def run_astar(adjacency_list, start, goal):
-    graph = nx.Graph(adjacency_list)
-    path = nx.astar_path(graph, start, goal)
-    return path
+def astar(start, goal, graph):
+    open_set = []
+    closed_set = set()
+    came_from = {}
+    g_score = {node: float('inf') for node in graph}
+    g_score[start] = 0
+    f_score = {node: float('inf') for node in graph}
+    f_score[start] = euclidean_distance(start, goal)
+    heapq.heappush(open_set, (f_score[start], start))
+
+    path = []  # List to store the path
+    v_ang_list = []  # List to store (v, ang)
+
+    while open_set:
+        current_f, current_node = heapq.heappop(open_set)
+
+        if current_node == goal:
+            path = reconstruct_path(came_from, current_node)
+            v_ang_list = [graph[node][-1][-1] for node in path]  # Extract (v, ang) from the path
+            return path, v_ang_list
+
+        closed_set.add(current_node)
+
+        for neighbor, cost, v_ang in graph[current_node]:
+            tentative_g_score = g_score[current_node] + cost
+
+            if tentative_g_score < g_score[neighbor]:
+                came_from[neighbor] = current_node
+                g_score[neighbor] = tentative_g_score
+                f_score[neighbor] = tentative_g_score + euclidean_distance(neighbor, goal)
+                if neighbor not in closed_set:
+                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+    return None, None  # No path found
 
 # Lazy PRM function
 # Runs A* on sampled nodes without checking for collisions
 # Checks generated path for collision and colliding nodes from graph
 # Repeats this process until a valid path is found or the graph becomes disconnected
 def run_lazy_prm(adjacency_list):
+    ti = time.time()
     while True:
-        path = run_astar(adjacency_list, start_point, goal_point)
+        path, v_ang_list = astar(start_point, goal_point, adjacency_list)  # Run A* to find a path and (v, ang) list
         
         # Draw path on the image
         image2 = image.copy()
@@ -372,17 +420,19 @@ def run_lazy_prm(adjacency_list):
 
         # Check if any obstacle nodes are still in the path
         if not any(inObstacle(node) for node in path):
-            print('Path found')
+            tf = time.time()
+            print('Path Found in: ', tf-ti, 's')            
             break  # If no obstacle nodes found in the path, exit the loop
 
         # Remove obstacle nodes from the adjacency list
         new_adjacency_list = {}
         for node, neighbors in adjacency_list.items():
-            new_neighbors = [neighbor for neighbor in neighbors if neighbor not in obstacle_nodes]
+            new_neighbors = [neighbor for neighbor in neighbors if neighbor[0] not in obstacle_nodes]
             new_adjacency_list[node] = new_neighbors
 
         adjacency_list = new_adjacency_list
-    return path, adjacency_list
+
+    return path, v_ang_list, adjacency_list
 
 radius = 22
 clearance = 2
@@ -414,7 +464,7 @@ start_point = (50,100,0)
 goal_point = (575,100,3)
 
 # Example usage
-num_samples = 600
+num_samples = 500
 space_limits = (0, spaceX, 0, spaceY)
 
 # Samples map uniformly
@@ -449,31 +499,30 @@ print('Connected nodes in: ', tf-ti, 's')
 # Draw connections on the image
 draw_connections(image, adjacency_list)
 
-# Run A* algorithm
-ti = time.time()
-path, adjacency_list = run_lazy_prm(adjacency_list)
-tf = time.time()
-print('Found Path in: ', tf-ti, 's')
+# Run Lazy PRM algorithm
+node_path, path, adjacency_list = run_lazy_prm(adjacency_list)
+print(path)
 
 # Draw path on the image
-for i in range(len(path) - 1):
-    cv2.line(image, (int(path[i][0]*conversion), int((path[i][1])*conversion)), (int(path[i+1][0]*conversion), int((path[i+1][1])*conversion)), (255, 0, 0), thickness)
+#for i in range(len(path) - 1):
+#    cv2.line(image, (int(path[i][0]*conversion), int((path[i][1])*conversion)), (int(path[i+1][0]*conversion), int((path[i+1][1])*conversion)), (255, 0, 0), thickness)
 
-image1 = cv2.resize(image, (resizeX, resizeY))
-video_output.write(image1)
-add_blank_frames(image1, video_output, 60, 3)
+#image1 = cv2.resize(image, (resizeX, resizeY))
+#video_output.write(image1)
+#add_blank_frames(image1, video_output, 60, 3)
 
-ti = time.time()
-path = smooth_path(path)
-tf = time.time()
-print('Smoothed Path in: ', tf-ti, 's')
+#ti = time.time()
+#path = smooth_path(path)
+#tf = time.time()
+#print('Smoothed Path in: ', tf-ti, 's')
 # Draw path on the image
-for i in range(len(path) - 1):
-    cv2.line(image, (int(path[i][0]*conversion), int((path[i][1])*conversion)), (int(path[i+1][0]*conversion), int((path[i+1][1])*conversion)), (255, 0, 0), thickness)
-
-image1 = cv2.resize(image, (resizeX, resizeY))
-video_output.write(image1)
-add_blank_frames(image1, video_output, 60, 0.3)
+#for i in range(len(path) - 1):
+#    cv2.line(image, (int(path[i][0]*conversion), int((path[i][1])*conversion)), (int(path[i+1][0]*conversion), int((path[i+1][1])*conversion)), (255, 0, 0), thickness)
+#
+#image1 = cv2.resize(image, (resizeX, resizeY))
+#video_output.write(image1)
+#add_blank_frames(image1, video_output, 60, 0.3)
 
 # Didn't store move data with the path so we have to recalculate here
-path = get_move_data(path)
+#path = get_move_data(path)
+#print(path)
