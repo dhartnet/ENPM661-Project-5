@@ -252,19 +252,6 @@ def smooth_path(path, max_distance=60, threshold=4):
 
     return path
 
-# Returns the path with the required move information
-def get_move_data(path, threshold=7):
-    move_path = []
-    moves = []
-    for i in range(len(path)-1):
-        point = path[i]
-        moves = newNodes(point, clearance, radius, rpm1, rpm2)
-        for move in moves:
-            distance = calculate_distance(point, move[0][0])
-            if distance <= threshold:           
-                move_path.append(move[0])
-    return move_path
-
 # Creates a list of the obstacles in the workspace
 def obstacle_space():
     obstacle_list = []
@@ -421,7 +408,8 @@ def run_lazy_prm(adjacency_list):
         # Check if any obstacle nodes are still in the path
         if not any(inObstacle(node) for node in path):
             tf = time.time()
-            print('Path Found in: ', tf-ti, 's')            
+            print('Path Found in: ', tf-ti, 's')
+            add_blank_frames(image2, video_output, 60, 3)         
             break  # If no obstacle nodes found in the path, exit the loop
 
         # Remove obstacle nodes from the adjacency list
@@ -502,27 +490,3 @@ draw_connections(image, adjacency_list)
 # Run Lazy PRM algorithm
 node_path, path, adjacency_list = run_lazy_prm(adjacency_list)
 print(path)
-
-# Draw path on the image
-#for i in range(len(path) - 1):
-#    cv2.line(image, (int(path[i][0]*conversion), int((path[i][1])*conversion)), (int(path[i+1][0]*conversion), int((path[i+1][1])*conversion)), (255, 0, 0), thickness)
-
-#image1 = cv2.resize(image, (resizeX, resizeY))
-#video_output.write(image1)
-#add_blank_frames(image1, video_output, 60, 3)
-
-#ti = time.time()
-#path = smooth_path(path)
-#tf = time.time()
-#print('Smoothed Path in: ', tf-ti, 's')
-# Draw path on the image
-#for i in range(len(path) - 1):
-#    cv2.line(image, (int(path[i][0]*conversion), int((path[i][1])*conversion)), (int(path[i+1][0]*conversion), int((path[i+1][1])*conversion)), (255, 0, 0), thickness)
-#
-#image1 = cv2.resize(image, (resizeX, resizeY))
-#video_output.write(image1)
-#add_blank_frames(image1, video_output, 60, 0.3)
-
-# Didn't store move data with the path so we have to recalculate here
-#path = get_move_data(path)
-#print(path)
