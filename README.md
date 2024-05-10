@@ -15,11 +15,11 @@ In the terminal navigate to where the ros package is saved and then navigate to 
 Build your package and launch "ros2 launch turtlebot3_project3 competition_world.launch.py"
 
 Run "python3 PRM_ros.py" in a new terminal, but ensure you are also in the <project3_ws/src/turtlebot3_project3/scripts> location
-  -This python script runs the script "LayPRM.py" and calls upon its outputs to use with ROS
+  -This python script runs the script "LazyPRM.py" and calls upon its outputs to use with ROS
 
-Enter the goal coordinates as prompted. The code will check that the provided coordinates are within the workspace and not inside any obstacles.
+The start and goal coordinates are currently fixed to maximise the distance and complexity the algorithm has to search for a path. Gazebo struggled with this long distance, though. 
 
-To enter the goal coordinates, just enter a goal location with the units in centimeters. The x-coordinate will be prompted first, then the y-coordinate.
+To change the goal coordinates, edit the "LazyPRM.py" file. At the bottom of the code you will see a heavily commented section where the goal coordinate can be changed. For short trips that seemed to work best in Gazebo, we recommend (200, 125, 0), or something similar.
 
 # Dependencies
 The following Python libraries are used:
