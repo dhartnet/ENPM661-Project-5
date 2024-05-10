@@ -1,57 +1,16 @@
-from queue import PriorityQueue
-import time
+# ENPM661 Project 5 Submission
+# Rey Roque-Pérez and Dustin Hartnett
 
-import numpy as np
+# Github Repository: https://github.com/dhartnet/ENPM661-Project-5
+
 import cv2
+import time
+import random
+import numpy as np
+import heapq
+from scipy.spatial import cKDTree
 
-# PriorityQueues entries in python are not updatable
-# This class is an implementation of the PriorityQueue that allows updating
-# It does this by keeping a copy of all items in the queue in a dictionary
-# It then uses the dictionary to search if an item is in the queue
-# It also passes a new argument to the put method (priority, item)
-class UpdateableQueue:
-    def __init__(self):
-        self.queue = PriorityQueue()
-        # Maps items to their corresponding queue entries
-        self.entry_finder = {}
-
-    # Adds or updates item in PriorityQueue
-    def put(self, priority, node):
-        # Extracting the key (x, y, theta) from the node
-        key = node[0]
-        if key in self.entry_finder:
-            current_priority, _ = self.entry_finder[key]
-            if priority < current_priority:
-                # Update the priority in the entry_finder
-                self.entry_finder[key] = (priority, node)
-                # Update the priority in the queue
-                self.queue.put((priority, node))
-                
-        else:
-            entry = (priority, node)
-            self.entry_finder[key] = entry
-            self.queue.put(entry)
-
-    def remove(self, key):
-        entry = self.entry_finder.pop(key)
-        # Return the item removed from the queue
-        return entry[1]  
-
-    def get(self):
-        priority, node = self.queue.get()
-        # Check if the item is still in entry_finder
-        key = node[0]
-        if key in self.entry_finder:
-            # Remove the item from the entry_finder
-            del self.entry_finder[key] 
-        return priority, node
-
-    def empty(self):
-        return self.queue.empty()
-
-    def __contains__(self, key):
-        return key in self.entry_finder   
-
+# Create the obstacle map
 def create_map():
     i = 0
     j = 0
@@ -75,11 +34,11 @@ def create_map():
 
         # obs 1
         if i >= x11 and i <= x12 and j >= y11 and j <= y12:
-            map[i,j] = 1
+            map_array[i,j] = 1
 
         # obs 2
         elif i >= x31 and i <= x32 and j >= y31 and j <= y32:
-            map[i,j] = 1
+            map_array[i,j] = 1
 
         i = i + 1
 
@@ -96,198 +55,25 @@ def create_map():
 # Return 'False' if in free space, 'True' if in an obstacle or outside the boundaries
 def inObstacle(maybeNode):
     node = tuple(maybeNode)
-    i = node[0]
-    j = node[1]
+    i = int(node[0])
+    j = int(node[1])
 
     # check if in map
     if i < clearance + radius or i > spaceX - clearance - radius or j < clearance + radius or j > spaceY - clearance - radius:
         return True
     
-    if map[i,j] == 1:
+    if map_array[i,j] == 1:
         return True
 
     return False
 
-# Check if node is inside of goal boundary
-def inGoal(node, goal_node):
-    goal_radius = 10 # cm
-    x_goal = goal_node[0]
-    y_goal = goal_node[1]
-    x_node = node[0]
-    y_node = node[1]
-    return np.sqrt(np.square(x_node-x_goal) + np.square(y_node-y_goal)) < goal_radius
-
-# Draws start node and end node
-def draw_nodes(canvas, start_node, goal_node):
-    cv2.rectangle(canvas, (conversion * start_node[0] - 10, conversion * start_node[1] - 10), (conversion * start_node[0] + 10, conversion * start_node[1] + 10), color=(0, 250, 0), thickness=cv2.FILLED)
-    cv2.rectangle(canvas, (conversion * goal_node[0] - 10, conversion * goal_node[1] - 10), (conversion * goal_node[0] + 10, conversion * goal_node[1] + 10), color=(0, 0, 255), thickness=cv2.FILLED)
-
-# Creates a list of the obstacles in the workspace
-def obstacle_space():
-    obstacle_list = []
-
-    # obs 1
-    x11 = 150 // res* conversion
-    x12 = 175 // res* conversion
-    y11 = 0 // res* conversion
-    y12 = 100 // res* conversion
-
-    # obs 3
-
-    x31 = 370 // res* conversion
-    x32 = 470 // res* conversion
-    y31 = 30 // res* conversion
-    y32 = 130 // res* conversion
-
-    obstacle_list.append(((0,0),(visX,visY)))
-    obstacle_list.append(((x11,y11),(x12,y12)))
-    obstacle_list.append(((x31,y31),(x32,y32)))
-
-    return obstacle_list
-
-# Populates the canvas with the obstacles
-def draw_obstacles(canvas, obstacles, video_output):
-    for obstacle in obstacles:      
-        if len(obstacle) == 2 and obstacle != ((0,0),(visX,visY)):
-            start_x = obstacle[0][0]
-            # Invert y-value
-            start_y = obstacle[0][1]
-            end_x = obstacle[1][0]
-            # Invert y-value
-            end_y = obstacle[1][1]
-            start_coordinate = (start_x, start_y)
-            end_coordinate = (end_x, end_y)
-            cv2.rectangle(canvas, pt1=start_coordinate, pt2=end_coordinate, color=(0, 0, 0), thickness=-1)
-        elif len(obstacle) == 3:
-            cv2.circle(canvas,(obstacle[0],visY-obstacle[1]), obstacle[2], (0,0,0), -1)
-    canvas1 = cv2.resize(canvas, (resizeX, resizeY))            
-    cv2.imshow('A*', canvas1)
-    video_output.write(canvas1)
-    cv2.waitKey(100)
-    return
-
-# Populates and updates the canvas with explored nodes
-def draw_explored(canvas, points, video_output, u1, u2):
-    count = 0
-    t = 0 # start time
-    r =  3.3 * conversion # wheel radius cm
-    L =  28.7 * conversion # robot diameter cm
-    dt = 0.2 # time step for plotting
-
-    u1 = np.pi * u1 / 30
-    u2 = np.pi * u2 / 30
-
-    actions = [[0, u1], [u1, 0], [u1, u1], [0, u2], [u2, 0], [u2, u2], [u1, u2], [u2, u1]]
-
-    # Start from the second point
-    for i in range(0, len(points)-1): 
-        point = points[i]
-            
-        current_node = point[0]
-
-        for action in actions:
-            x = int(conversion * current_node[0])
-            y = int(conversion * current_node[1])
-            theta = np.pi * current_node[2] * 30 / 180 # orientation in radians  
-            t = 0
-            ul = action[0] # left wheel vel
-            ur = action[1] # right wheel vel
-            
-            while t <= 1.0:
-                if inObstacle((x//conversion, y//conversion)):
-                    break
-                t = t + dt
-                xs = x
-                ys = y
-                x += int((r/2) * (ul + ur) * np.cos(theta) * dt)
-                y += int((r/2) * (ul + ur) * np.sin(theta) * dt)
-                theta += (r/L) * (ur - ul) * dt
-                cv2.line(canvas, (xs, ys), (x, y), (255,0,0), conversion) # image, point 1, point 2, color, thickness
-
-            count += 1
-
-        if count % 4000 == 0:
-            count = 0          
-            canvas1 = cv2.resize(canvas, (resizeX, resizeY))            
-            cv2.imshow('A*', canvas1)
-            video_output.write(canvas1)
-            # cv2.waitKey(1000//120)
-            cv2.waitKey(1)
-
-    canvas1 = cv2.resize(canvas, (resizeX, resizeY))            
-    cv2.imshow('A*', canvas1)
-    video_output.write(canvas1)
-    cv2.waitKey(1)            
-    return
-
-# Populates and updates the canvas with path nodes
-def draw_path(canvas, path, video_output):
-    count = 0
-    prev_point = None  # Initialize previous point
-    for i in range(len(path)): 
-        point = path[i][0]
-        
-        # Draw the current path node
-        cv2.rectangle(canvas, (conversion * point[0], conversion * point[1]), (conversion * point[0] + 10, conversion * point[1] + 10), color=(0, 0, 250), thickness=thickness)
-
-        if prev_point is not None:
-            # Draw a line from the previous point to the current point
-            cv2.line(canvas, (conversion * prev_point[0], conversion * prev_point[1]), (conversion * point[0], conversion * point[1]), (0, 0, 0), thickness)
-
-        # Create a temporary copy of the canvas
-        temp_canvas = canvas.copy()
-
-        # Draw a circle at the current point
-        cv2.circle(temp_canvas, (conversion * point[0], conversion * point[1]), conversion * radius, color=(0, 0, 255), thickness=-1)
-
-        count += 1
-        if count % 1 == 0:
-            count = 0           
-            canvas1 = cv2.resize(temp_canvas, (resizeX, resizeY))            
-            cv2.imshow('A*', canvas1)
-            # Adding the same frame to the video multiple times so it goes slower
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            video_output.write(canvas1)
-            cv2.waitKey(1000//10)
-
-        prev_point = point  # Update previous point
-
-    cv2.waitKey(10000) # video close time in ms
-    return
-
-# Adds blank frames for x amount of seconds at end of video
-def add_blank_frames(canvas, video_output, fps, seconds):
-    blank_frames = fps * seconds
-    canvas1 = cv2.resize(canvas, (resizeX, resizeY))            
-    for _ in range(blank_frames):
-        video_output.write(canvas1)
-    return
-
 # Non-holonomic move function
 def newNodes(nodeState, clearance, radius, u1, u2): # (node, lower wheel velocity, higher wheel velocity) speeds in RPM
   # Extract node information from nodeState value
-  node = tuple(nodeState[0]) # Rounded node
-  raw_node = tuple(nodeState[3]) # Unrounded node
-  xi = node[0] # Rounded node
-  yi = node[1] # Rounded node
+  node = tuple(nodeState) # Rounded node
+  xi = int(node[0]) # Rounded node
+  yi = int(node[1]) # Rounded node
   thetai = node[2]*30 # deg # Rounded node
-
-  # xi = raw_node[0] # Unrounded node
-  # yi = raw_node[1] # Unrounded node
-  # thetai = raw_node[2] # Unrounded node
 
   u1 = np.pi * u1 / 30 # (rad/s)
   u2 = np.pi * u2 / 30# (rad/s)
@@ -342,149 +128,310 @@ def newNodes(nodeState, clearance, radius, u1, u2): # (node, lower wheel velocit
     ang = (r/L) * (ur - ul)
 
     if not (newX < clearance + radius or newX > spaceX - clearance - radius or newY < clearance + radius or newY > spaceY - clearance - radius):
-      newNodes.append(((newX, newY, new_theta), round(c2c), (v, ang), (x, y, theta))) # outputs node, cost to come, and associated linear and ang velocity to get to each node (to be sent to robot)
+      newNodes.append(((newX, newY, new_theta), round(c2c), (v, ang))) # outputs node, cost to come, and associated linear and ang velocity to get to each node (to be sent to robot)
 
   return newNodes
 
-# Calculates cost to go
-def heuristic(node, goal_node, weight):
-  return weight * np.sqrt(np.square(goal_node[0] - node[0]) + np.square(goal_node[1] - node[1]))
+# Samples random points in the map
+def sample_points(num_samples, space_limits):
+    min_x, max_x, min_y, max_y = space_limits
+    sampled_points = [start_point, goal_point]
+    for _ in range(num_samples-2):
+        x = random.randint(min_x, max_x)
+        y = random.randint(min_y, max_y)
+        for theta_index in range(12):  # Iterate over 12 theta values
+            sampled_points.append((round(x, 0), round(y, 0), theta_index))
+    return sampled_points
 
-# Runs A* from start node to goal node and returns visited list and parent information
-def a_star_algorithm(blocked_grid, start_node, goal_node):
-    # Create cost_grid and initialize cost to come for start_node
-    cost_grid = [[[float('inf')] * 12 for _ in range(spaceY)] for _ in range(spaceX)]
-    cost_grid[start_node[0]][start_node[1]][start_node[2]] = 0
+# Samples a uniform grid of points in the map
+def sample_points_uniform(num_samples, space_limits, start_node, end_node):
 
-    # Create grid to store parents
-    parent_grid = [[[None] * 12 for _ in range(spaceY)] for _ in range(spaceX)]
-    parent_grid[start_node[0]][start_node[1]][start_node[2]] = None
+    min_x, max_x, min_y, max_y = space_limits
 
-    # Create grid to store parents
-    visited_grid = [[[False] * 12 for _ in range(spaceY)] for _ in range(spaceX)]
-    visited_list = []  
-
-    # Priority queue to store open nodes
-    # Cost to come, coordinate values (x,y), parent
-    open_queue = UpdateableQueue()
-    open_queue.put(0, (start_node,(0),(0,0), (start_node[0],start_node[1],int(30*start_node[2]))))  # (priority, node)
-
-    while not open_queue.empty():
-        _, node_tuple = open_queue.get()
-        node = node_tuple[0]
-        #raw_node = node_tuple[3]
-        visited_grid[node[0]][node[1]][node[2]] = True
-        visited_list.append(node_tuple)
-
-        if inGoal(node, goal_node):
-            return parent_grid, visited_list
-
-        # Get neighboring nodes
-        actions = []
-        actions = newNodes(node_tuple, clearance, radius, rpm1, rpm2)
-        node_cost = cost_grid[node[0]][node[1]][node[2]]
-
-        for action in actions:
-            action_cost = action[1]
-            move = action[0]
-            raw_move = action[3]
-            if not visited_grid[move[0]][move[1]][move[2]] and not blocked_grid[move[0]][move[1]]:
-                new_cost = node_cost + action_cost
-                if  new_cost < cost_grid[move[0]][move[1]][move[2]]:
-                    cost_grid[move[0]][move[1]][move[2]] = new_cost
-                    priority = new_cost + heuristic(raw_move, goal_node, weight)
-                    open_queue.put(priority, action)                    
-                    parent_grid[move[0]][move[1]][move[2]] = node_tuple
-
-    return parent_grid, visited_list, print(actions), print("Failed to find goal")
-
-# Backtracking using path list created from visited/path dictionary
-def find_path(parent_grid, visited_list, start):
-    node_tuple = visited_list[-1]
-    current_node = node_tuple[0]
-    path = [node_tuple]
-    start_node = start
-    while start_node != current_node:
-        temp_node = parent_grid[int(current_node[0])][int(current_node[1])][current_node[2]]
-        current_node = temp_node
-        path.insert(0, current_node)
-        current_node = current_node[0]
-    return path
-
-def lazy_PRM(start_node, goal_node):
-    blocked_grid = [[False for _ in range(spaceY)] for _ in range(spaceX)]
-    blocked_grid[start_node[0]][start_node[1]] = False
+    sampled_points = [(start_node,0,(0,0)), (end_node,0,(0,0))]
     
-    path = ()  
-    in_obstacle = True
-    while in_obstacle:  
-        #print("Running A*", '\n')    
-        explored = a_star_algorithm(blocked_grid, start_node, goal_node)
-        parents = explored[0]
-        visited = explored[1]
+    # Calculate the aspect ratio of the space
+    aspect_ratio = (max_x - min_x) / (max_y - min_y)
+    
+    num_samples = num_samples - 2
 
-        #for item in visited:
-            #print(item)
+    # Calculate the number of samples along each axis
+    num_samples_x = int((num_samples * aspect_ratio) ** 0.5)
+    num_samples_y = int(num_samples / num_samples_x)
+    
+    # Calculate the step size for sampling along x and y axes
+    step_x = (max_x - min_x) / (num_samples_x - 1)
+    step_y = (max_y - min_y) / (num_samples_y - 1)
+    
+    # Generate uniformly sampled points
+    for i in range(num_samples_x):
+        for j in range(num_samples_y):
+            x = min_x + i * step_x
+            y = min_y + j * step_y
+            for theta_index in range(12):  # Iterate over 12 theta values
+                sampled_points.append(((round(x, 0), round(y, 0), theta_index),0,(0,0)))
+    
+    # Return the sampled points
+    return sampled_points
 
-        # Run BackTracking to generate path
-        path = find_path(parents, visited, start_node)
-        in_obstacle = False
-        
-        for node_info in path:
-            node = node_info[0]
-            if inObstacle(node):
-                in_obstacle = True
-                blocked_grid[node[0]][node[1]] = True 
+# Calculates distance between two points
+def calculate_distance(point1, point2):
+    return np.linalg.norm(np.array(point1) - np.array(point2))
 
-    # # Initialize Canvas to visualization size
-    canvas = np.ones((visY, visX, 3), dtype=np.uint8) * 255  # White canvas
+# Takes the sampled nodes list and generates a connected graph
+def generate_adjacency_list(sampled_points, max_neighbors=4, max_distance=30, threshold=4):
+    adjacency_list = {}
+    # Extracting only the relevant tuple elements from sampled_points
+    only_points = [point[0] for point in sampled_points]
+    point_array = np.array(only_points)  # Convert to NumPy array
+    
+    tree = cKDTree(point_array)
+    
+    for point in sampled_points:
+        indices = tree.query_ball_point(point[0], max_distance)
+        possible_neighbors = [tuple(neighbor) for neighbor in point_array[indices] if not np.array_equal(neighbor, point[0])]
+        random.shuffle(possible_neighbors)  # Shuffle the list of neighbors before rounding
+        valid_neighbors = connect_neighbors(point[0], possible_neighbors, threshold, max_neighbors)
+        if len(valid_neighbors) > max_neighbors:
+            valid_neighbors = random.sample(valid_neighbors, max_neighbors)  # Randomly select max_neighbors from valid_neighbors
+        adjacency_list[point[0]] = valid_neighbors
+    
+    return adjacency_list
 
-    # # Initialize video. Video is saved to working directory.
-    v_writer = cv2.VideoWriter_fourcc(*'mp4v')
-    fps = 60
-    video_output = cv2.VideoWriter('a_star_output.mp4', v_writer, fps, (resizeX, resizeY))
+# Finds the possible neighbors for a given point
+def connect_neighbors(point, possible_neighbors, threshold, max_neighbors):
+    neighbors = []
+    moves = newNodes(point, clearance, radius, rpm1, rpm2)
+#    moves = [move[0] for move in moves]
+    count = 0  # Variable to keep track of the number of neighbors found
+    for neighbor in possible_neighbors:    
+        if count >= max_neighbors:
+            break  # Exit the loop if maximum neighbors reached
+        for move in moves:
+            distance = calculate_distance(neighbor, move[0])
+            if distance <= threshold:
+                neighbors.append((neighbor,move[1],move[2]))
+                count += 1
+                if count >= max_neighbors:
+                    break  # Exit the inner loop if maximum neighbors reached
+                break  # Exit the inner loop if a valid neighbor is found
+    
+    return neighbors
 
-    # # Get obstacle coordinates
-    obstacles = obstacle_space()
-    # # Initializes Map and Draws the obstacles
-    draw_obstacles(canvas, obstacles, video_output)
+# Tries to delete unneeded nodes
+def smooth_path(path, max_distance=60, threshold=4):
+    i = 0
+    while i < len(path) - 1:
+        point = path[i]
 
-    # # Draws the Start and End Node
-    draw_nodes(canvas, start_node, goal_node)
+        # Find all subsequent points within max_distance from the current point
+        nearby_points = [next_point for next_point in path[i+1:] if calculate_distance(point, next_point) <= max_distance]
 
-    # # Draws the explored nodes.
-    draw_explored(canvas, visited, video_output, rpm1, rpm2)
+        # If no nearby points are found, move to the next point in the path
+        if not nearby_points:
+            i += 1
+            continue
 
-    # # Draws the Start and End Node covered by the explored lines
-    draw_nodes(canvas, start_node, goal_node)
+        # Find the furthest move among the nearby points
+        furthest_move = None
+        max_move_distance = -1
+        moves = newNodes(point, clearance, radius, rpm1, rpm2)
+        for move in moves:
+            if not inObstacle(move[0]) and move[0] in nearby_points:
+                move_distance = calculate_distance(point, move[0])
+                if move_distance > max_move_distance:
+                    furthest_move = move[0]
+                    max_move_distance = move_distance
 
-    # # Draws path and circle representing the robot
-    print('drawing_path')
-    draw_path(canvas, path, video_output)
-
-    # # Adds 2 frames at end of video so that it doesn't end instantly
-    add_blank_frames(canvas, video_output, fps, 2)
-    video_output.release()
+        # If a furthest move is found, update the path
+        if furthest_move and furthest_move != path[i+1]:
+            # Remove all points after the current point and prior to the next point
+            path = path[:i+1] + path[path.index(furthest_move):]
+        else:
+            i += 1  # Move to the next point if no furthest move found
 
     return path
 
+# Creates a list of the obstacles in the workspace
+def obstacle_space():
+    obstacle_list = []
 
-#### Main ###
+    # obs 1
+    x11 = 150 // res* conversion
+    x12 = 175 // res* conversion
+    y11 = 0 // res* conversion
+    y12 = 100 // res* conversion
+
+    # obs 3
+
+    x31 = 370 // res* conversion
+    x32 = 470 // res* conversion
+    y31 = 30 // res* conversion
+    y32 = 130 // res* conversion
+
+    obstacle_list.append(((0,0),(visX,visY)))
+    obstacle_list.append(((x11,y11),(x12,y12)))
+    obstacle_list.append(((x31,y31),(x32,y32)))
+
+    return obstacle_list
+
+# Populates the canvas with the obstacles
+def draw_obstacles(canvas, obstacles, video_output):
+    for obstacle in obstacles:      
+        if len(obstacle) == 2 and obstacle != ((0,0),(visX,visY)):
+            start_x = obstacle[0][0]
+            # Invert y-value
+            start_y = obstacle[0][1]
+            end_x = obstacle[1][0]
+            # Invert y-value
+            end_y = obstacle[1][1]
+            start_coordinate = (start_x, start_y)
+            end_coordinate = (end_x, end_y)
+            cv2.rectangle(canvas, pt1=start_coordinate, pt2=end_coordinate, color=(0, 0, 0), thickness=-1)
+    canvas1 = cv2.resize(canvas, (resizeX, resizeY))            
+    #cv2.imshow('A*', canvas1)
+    video_output.write(canvas1)
+    #cv2.waitKey(0)
+    return
+
+# Draws the connections between nodes
+def draw_connections(image, adjacency_list, color=(0, 255, 0), thickness=4):
+    for point, neighbors in adjacency_list.items():
+        for neighbor in neighbors:
+            cv2.line(image, (int(point[0]*conversion), int(point[1]*conversion)), (int(neighbor[0][0]*conversion), int(neighbor[0][1]*conversion)), color, thickness)
+    image1 = cv2.resize(image, (resizeX, resizeY)) 
+    #cv2.imshow('A*', image1)
+    video_output.write(image1)
+    add_blank_frames(image1,video_output,60,3)
+    #cv2.waitKey(0) 
+    return
+
+# Draws the sampled points
+def draw_points(image, points, color=(255, 0, 0), radius=20):
+    for point in points:
+        x = int(point[0][0] * conversion)
+        y = int(point[0][1] * conversion)
+        cv2.circle(image, (x, y), radius, color, -1)
+    image1 = cv2.resize(image, (resizeX, resizeY))
+    #cv2.imshow('A*', image1)
+    video_output.write(image1)
+    add_blank_frames(image1,video_output,60,1)
+    #cv2.waitKey(0)
+    return
+
+# Draws start node and end node
+def draw_nodes(canvas, start_node, goal_node):
+    cv2.rectangle(canvas, (conversion * start_node[0] - 30, conversion * start_node[1] - 30), (conversion * start_node[0] + 30, conversion * start_node[1] + 30), color=(0, 250, 0), thickness=cv2.FILLED)
+    cv2.rectangle(canvas, (conversion * goal_node[0] - 30, conversion * goal_node[1] - 30), (conversion * goal_node[0] + 30, conversion * goal_node[1] + 30), color=(0, 0, 255), thickness=cv2.FILLED)
+
+# Adds blank frames for x amount of seconds at end of video
+def add_blank_frames(canvas, video_output, fps, seconds):
+    blank_frames = int(fps * seconds)
+    canvas1 = cv2.resize(canvas, (resizeX, resizeY))            
+    for _ in range(blank_frames):
+        video_output.write(canvas1)
+    return
+
+# Heuristic
+def euclidean_distance(node1, node2):
+    x1, y1, _ = node1
+    x2, y2, _ = node2
+    return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+
+# Reconstruct the path from the came_from dictionary
+def reconstruct_path(came_from, current_node):
+    total_path = [current_node]
+    while current_node in came_from:
+        current_node = came_from[current_node]
+        total_path.append(current_node)
+    return total_path[::-1]
+
+# Runs A* on the given graph. Doesn't check for collision or explore the obstacle space. 
+# Just navigates the given predefined graph. Not the focus of this project.
+def astar(start, goal, graph):
+    open_set = []
+    closed_set = set()
+    came_from = {}
+    g_score = {node: float('inf') for node in graph}
+    g_score[start] = 0
+    f_score = {node: float('inf') for node in graph}
+    f_score[start] = euclidean_distance(start, goal)
+    heapq.heappush(open_set, (f_score[start], start))
+
+    path = []  # List to store the path
+    v_ang_list = []  # List to store (v, ang)
+
+    while open_set:
+        current_f, current_node = heapq.heappop(open_set)
+
+        if current_node == goal:
+            path = reconstruct_path(came_from, current_node)
+            v_ang_list = [graph[node][-1][-1] for node in path]  # Extract (v, ang) from the path
+            return path, v_ang_list
+
+        closed_set.add(current_node)
+
+        for neighbor, cost, v_ang in graph[current_node]:
+            tentative_g_score = g_score[current_node] + cost
+
+            if tentative_g_score < g_score[neighbor]:
+                came_from[neighbor] = current_node
+                g_score[neighbor] = tentative_g_score
+                f_score[neighbor] = tentative_g_score + euclidean_distance(neighbor, goal)
+                if neighbor not in closed_set:
+                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+    return None, None  # No path found
+
+# Lazy PRM function
+# Runs A* on sampled nodes without checking for collisions
+# Checks generated path for collision and colliding nodes from graph
+# Repeats this process until a valid path is found or the graph becomes disconnected
+def run_lazy_prm(adjacency_list):
+    ti = time.time()
+    while True:
+        path, v_ang_list = astar(start_point, goal_point, adjacency_list)  # Run A* to find a path and (v, ang) list
+        
+        # Draw path on the image
+        image2 = image.copy()
+
+        for i in range(len(path) - 1):
+            cv2.line(image2, (int(path[i][0]*conversion), int((path[i][1])*conversion)), (int(path[i+1][0]*conversion), int((path[i+1][1])*conversion)), (255, 0, 0), thickness)
+
+        image2 = cv2.resize(image2, (resizeX, resizeY))
+        video_output.write(image2)
+        add_blank_frames(image2,video_output,60,0.3)        
+
+        # Identify obstacle nodes in the path
+        obstacle_nodes = [node for node in path if inObstacle(node)]
+
+        # Check if any obstacle nodes are still in the path
+        if not any(inObstacle(node) for node in path):
+            tf = time.time()
+            print('Path Found in: ', tf-ti, 's')
+            add_blank_frames(image2, video_output, 60, 3)         
+            break  # If no obstacle nodes found in the path, exit the loop
+
+        # Remove obstacle nodes from the adjacency list
+        new_adjacency_list = {}
+        for node, neighbors in adjacency_list.items():
+            new_neighbors = [neighbor for neighbor in neighbors if neighbor[0] not in obstacle_nodes]
+            new_adjacency_list[node] = new_neighbors
+
+        adjacency_list = new_adjacency_list
+
+    return path, v_ang_list, adjacency_list
+
+radius = 22
+clearance = 2
+# Wheel speeds in RPM 
+rpm1 = (int(40))
+rpm2 = (int(80))
 res = 1
 
-weight = 1.4 # option for weighted A*
-
-# Robot Radius
-radius = 22 // res # cm
-
-# Additional clearance to be added to the radius
-clearance = 4 // res # cm
-
-# Grid Size Variables - Used as indexes for storing node information
-
-spaceX = 600 // res # cm
-spaceY = 200 // res # cm
-map = np.zeros((spaceX, spaceY))
+spaceX = 600
+spaceY = 200
+map_array = np.zeros((spaceX, spaceY))
 create_map()
 
 # Visualization Size variables
@@ -498,49 +445,53 @@ conversion = visX//spaceX
 # Then we resize that drawn canvas to 1200x400-
 # Technically we could have used 1200x400 from the start but it doesn't look as detailed.
 resizeX = 1200 # pixels
-resizeY = 400 # pixels
+resizeY = 500 # pixels
 thickness = conversion
 
-Startx = int(input('Starting X Coordinate:  '))
-print('')
-Starty = int(input('Starting Y Coordinate:  '))
-print('')
-Starto = int(input('Starting Orientation (Must Be Multiple of 30 Degrees):  '))
-print('')
-Goalx = int(input('Goal X Coordinate: '))
-print('')
-Goaly = int(input('Goal Y Coordinate: '))
-print('')
-Goalo = int(input('Goal Orientation (Must Be Multiple of 30 Degrees):  '))
-print('')
+# DO NOT CHANGE - GAZEBO IS SET UP FOR THIS START NODE
+start_point = (50,100,0)
 
-# Pre-defined start node in Gazebo project
-# start_node = tuple((Startx// res , Starty// res , Starto // 30))
+######### CAN CHANGE - CAN PUT ANY VALUE BETWEEN X[0:600], Y[0:200], THETA[0:11] - (INTEGERS ONLY)#########
+### IF A NODE IS IN AN OBSTACLE, THE CODE WILL FAIL ###
+goal_point = (550, 100, 0)
 
-# #Node used for testing
-# goal_node = tuple((Goalx// res , Goaly// res , Goalo // 30))
+# Example usage
+num_samples = 600
+space_limits = (0, spaceX, 0, spaceY)
 
-# Pre-defined start node in Gazebo project
-start_node = tuple((50// res , 100// res , 0))
-
-#Node used for testing
-goal_node = tuple((575// res , 100// res , 0))
-
-# Wheel speeds in RPM 
-rpm1 = (int(40))
-rpm2 = (int(80))
-
-# Start timer
+# Samples map uniformly
 ti = time.time()
-
-# Run A* Algorithm
-optimizedPath = lazy_PRM(start_node, goal_node)
-
-# for item in optimizedPath:
-#     print(item, '\n')
-
-# print(optimizedPath)
-
-# Get time taken to find path
+sampled_points = sample_points_uniform(num_samples, space_limits, start_point, goal_point)
 tf = time.time()
-print('Path found in: ', tf-ti)
+print('Sampled points in: ', tf-ti, 's')
+
+# Initialize Canvas to visualization size
+image = np.ones((visY, visX, 3), dtype=np.uint8) * 255  # White canvas
+
+# Initialize video. Video is saved to working directory.
+v_writer = cv2.VideoWriter_fourcc(*'mp4v')
+fps = 60
+video_output = cv2.VideoWriter('output.mp4', v_writer, fps, (resizeX, resizeY))
+
+# Get obstacle coordinates
+obstacles = obstacle_space()
+# Initializes Map and Draws the obstacles
+draw_obstacles(image, obstacles, video_output)
+
+# Draw sampled points on the image
+draw_points(image, sampled_points)
+draw_nodes(image, start_point, goal_point)
+
+# Create connections/Generate adjacency graph
+ti = time.time()
+adjacency_list = generate_adjacency_list(sampled_points)
+tf = time.time()
+print('Connected nodes in: ', tf-ti, 's')
+
+# Draw connections on the image
+draw_connections(image, adjacency_list)
+
+# Run Lazy PRM algorithm
+node_path, path, adjacency_list = run_lazy_prm(adjacency_list)
+# print(path, '\n')
+# print(node_path)
